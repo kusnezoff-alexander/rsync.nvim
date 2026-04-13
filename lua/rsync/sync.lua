@@ -199,23 +199,34 @@ end
 --- @return string #valid rsync command
 local function compose_sync_down_command(remote_includes, project_path, destination_path, ignorefile_paths)
     local filters = ""
+    local filter_template = "-f'+ %s' "
+    if type(remote_includes) == "string" then
+        remote_includes = { remote_includes }
+    end
     if type(remote_includes) == "table" then
-        local filter_template = "-f'+ %s' "
         for _, value in pairs(remote_includes) do
             filters = filters .. filter_template:format(value)
+            -- For directory patterns, also include their contents recursively
+            if value:sub(-1) == "/" then
+                filters = filters .. filter_template:format(value .. "**")
+            end
         end
-    elseif type(remote_includes) == "string" then
-        filters = "-f'+ " .. remote_includes .. "' "
     end
 
     local include, exclude = create_filters(ignorefile_paths)
+
+    -- Ensure source path has trailing slash to sync contents, not the directory itself
+    local source = destination_path
+    if source:sub(-1) ~= "/" then
+        source = source .. "/"
+    end
 
     local command = "rsync -varz "
         .. filters
         .. include
         .. exclude
         .. "-f'- .nvim' "
-        .. destination_path
+        .. source
         .. " "
         .. project_path
     return command
@@ -227,8 +238,8 @@ function sync.sync_down()
         local current_status = config_table.status.project
 
         if current_status.state == ProjectSyncStates.SYNC_UP then
-            vim.api.nvim_err_writeln("Could not sync down, due to sync up still running")
-            return
+            _RsyncProjectConfigs[config_table.project_path].status.project.state = ProjectSyncStates.STOPPED
+            vim.fn.jobstop(current_status.job_id)
         elseif current_status.state == ProjectSyncStates.SYNC_DOWN then
             _RsyncProjectConfigs[config_table.project_path].status.project.state = ProjectSyncStates.STOPPED
             vim.fn.jobstop(current_status.job_id)
