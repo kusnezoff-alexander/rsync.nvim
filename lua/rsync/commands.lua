@@ -18,10 +18,19 @@ function commands.setup(rsync_nvim)
                     return
                 end
                 vim.api.nvim_create_autocmd({ "BufWritePost" }, {
-                    callback = function()
-                        if config.get_current_config().sync_on_save then
-                            sync.sync_up()
+                    callback = function(args)
+                        if not config.get_current_config().sync_on_save then
+                            return
                         end
+                        -- don't even try to sync up files that live in a
+                        -- remote_to_host_only dir: they cannot travel that
+                        -- direction, and triggering sync_up here only
+                        -- produces spurious "sync down still running" errors
+                        -- when the project is mid-RsyncDown.
+                        if sync.is_in_remote_to_host_only(args.file) then
+                            return
+                        end
+                        sync.sync_up()
                     end,
                     group = rsync_nvim,
                     buffer = vim.api.nvim_get_current_buf(),

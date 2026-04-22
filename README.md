@@ -1,10 +1,10 @@
-[![codecov](https://codecov.io/gh/OscarCreator/rsync.nvim/branch/master/graph/badge.svg?token=GYELY6KJZ6)](https://codecov.io/gh/OscarCreator/rsync.nvim)
-
 # rsync.nvim
 
 Asynchronously transfer your files with `rsync` on save.
 
-![output](https://github.com/OscarCreator/rsync.nvim/assets/53407525/c5c402bd-98ac-4899-9ce0-ebf27db28d29)
+Fork of [kusnezoff-alexander/rsync.nvim](https://github.com/kusnezoff-alexander/rsync.nvim) with additional options for directional-only sync.
+
+![output](https://github.com/kusnezoff-alexander/rsync.nvim/assets/53407525/c5c402bd-98ac-4899-9ce0-ebf27db28d29)
 
 ## Dependencies
 
@@ -16,7 +16,7 @@ Asynchronously transfer your files with `rsync` on save.
 ```lua
 -- packer.nvim
 use {
-    'OscarCreator/rsync.nvim',
+    'kusnezoff-alexander/rsync.nvim',
     run = 'make',
     requires = {'nvim-lua/plenary.nvim'},
     config = function()
@@ -25,7 +25,7 @@ use {
 }
 -- lazy.nvim
 {
-    'OscarCreator/rsync.nvim',
+    'kusnezoff-alexander/rsync.nvim',
     build = 'make',
     dependencies = 'nvim-lua/plenary.nvim',
     config = function()
@@ -58,6 +58,18 @@ remote_includes = ["build.log", "build/generated.json"]
 # excluded from "SyncUp" and "SyncDown" except ones specified in `remote_includes`.
 # For example, to exclude file(s) in the global gitignore and the project gitignore:
 ignorefile_paths = ["~/.gitignore", ".gitignore"]
+
+# Directories (relative to the project root) that should ONLY be synced from
+# the local host to the remote. `RsyncDown` will not pull them back. Useful
+# for source/config directories you want to push to a cluster but never
+# overwrite locally with whatever is on the remote.
+host_to_remote_only = ["src/", ".nvim/"]
+
+# Directories (relative to the project root) that should ONLY be synced from
+# the remote back to the local host. `RsyncUp` will not push them up. Useful
+# for build output or experiment results produced on the remote that should
+# flow back to the host but never the other way.
+remote_to_host_only = ["data/", "build/"]
 ```
 
 ## Commands

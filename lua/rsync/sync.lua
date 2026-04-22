@@ -89,18 +89,75 @@ local function create_filters(filter_paths)
     return include, exclude
 end
 
+--- Check whether a file path lives inside any of the project's
+--- `remote_to_host_only` directories. Used to skip auto sync-up on save
+--- when the file cannot legally flow to the remote anyway.
+--- @param file_path string absolute path to the saved file
+--- @return boolean
+function sync.is_in_remote_to_host_only(file_path)
+    local config_table = project.get_config_table()
+    if config_table == nil then
+        return false
+    end
+    local dirs = config_table.remote_to_host_only
+    if type(dirs) == "string" then
+        dirs = { dirs }
+    end
+    if type(dirs) ~= "table" then
+        return false
+    end
+    local relative = path:new(file_path):make_relative(config_table.project_path)
+    for _, d in ipairs(dirs) do
+        local dir_prefix = d
+        if dir_prefix:sub(-1) ~= "/" then
+            dir_prefix = dir_prefix .. "/"
+        end
+        if relative:sub(1, #dir_prefix) == dir_prefix then
+            return true
+        end
+    end
+    return false
+end
+
+--- Build --exclude args for directories that should only flow one direction.
+--- Passing the opposite direction's list produces the excludes to drop them
+--- from the current rsync invocation.
+--- @param dirs table|string|nil list of directory patterns or a single pattern
+--- @return string
+local function compose_directional_excludes(dirs)
+    local excludes = ""
+    if type(dirs) == "string" then
+        dirs = { dirs }
+    end
+    if type(dirs) == "table" then
+        for _, d in ipairs(dirs) do
+            excludes = excludes .. "--exclude='" .. d .. "' "
+        end
+    end
+    return excludes
+end
+
 --- Creates valid rsync command to sync up
 --- @param project_path string the path to project
 --- @param destination_path string the destination path which files will be synced to
 --- @param ignorefile_paths table the paths to ignore files
+--- @param remote_to_host_only table|string|nil directories that must only flow remote->host and are therefore excluded from sync up
 --- @return string #valid rsync command
-local function compose_sync_up_command(project_path, destination_path, ignorefile_paths)
+local function compose_sync_up_command(project_path, destination_path, ignorefile_paths, remote_to_host_only)
     -- TODO have command be a separate type
 
     -- read ignore files append lines without ! with --include
     local include, exclude = create_filters(ignorefile_paths)
+    local directional = compose_directional_excludes(remote_to_host_only)
 
-    return "rsync -varz --delete" .. include .. exclude .. "-f'- .nvim' " .. project_path .. " " .. destination_path
+    return "rsync -varz --delete"
+        .. include
+        .. exclude
+        .. directional
+        .. "-f'- .nvim' "
+        .. project_path
+        .. " "
+        .. destination_path
 end
 
 --- Sync project to remote
@@ -116,8 +173,12 @@ function sync.sync_up(report_error)
 
             vim.fn.jobstop(current_status.job_id)
         end
-        local command =
-            compose_sync_up_command(config_table.project_path, config_table.remote_path, config_table.ignorefile_paths)
+        local command = compose_sync_up_command(
+            config_table.project_path,
+            config_table.remote_path,
+            config_table.ignorefile_paths,
+            config_table.remote_to_host_only
+        )
         safe_sync(command, function(res)
             project:run(function(project_config)
                 _RsyncProjectConfigs[project_config.project_path].status.project.state = ProjectSyncStates.SYNC_UP
@@ -196,8 +257,9 @@ end
 --- @param project_path string the path to project
 --- @param destination_path string the destination path which files will be synced from
 --- @param ignorefile_paths table the paths to ignore files
+--- @param host_to_remote_only table|string|nil directories that must only flow host->remote and are therefore excluded from sync down
 --- @return string #valid rsync command
-local function compose_sync_down_command(remote_includes, project_path, destination_path, ignorefile_paths)
+local function compose_sync_down_command(remote_includes, project_path, destination_path, ignorefile_paths, host_to_remote_only)
     local filters = ""
     local filter_template = "-f'+ %s' "
     if type(remote_includes) == "string" then
@@ -214,6 +276,7 @@ local function compose_sync_down_command(remote_includes, project_path, destinat
     end
 
     local include, exclude = create_filters(ignorefile_paths)
+    local directional = compose_directional_excludes(host_to_remote_only)
 
     -- Ensure source path has trailing slash to sync contents, not the directory itself
     local source = destination_path
@@ -225,6 +288,7 @@ local function compose_sync_down_command(remote_includes, project_path, destinat
         .. filters
         .. include
         .. exclude
+        .. directional
         .. "-f'- .nvim' "
         .. source
         .. " "
@@ -248,7 +312,8 @@ function sync.sync_down()
             config_table.remote_includes,
             config_table.project_path,
             config_table.remote_path,
-            config_table.ignorefile_paths
+            config_table.ignorefile_paths,
+            config_table.host_to_remote_only
         )
         safe_sync(command, function(res)
             project:run(function(project_config)

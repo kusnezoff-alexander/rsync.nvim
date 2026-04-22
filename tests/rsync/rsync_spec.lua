@@ -850,4 +850,85 @@ describe("rsync", function()
             assert.equals(require("rsync").status(), "Sync cancelled")
         end)
     end)
+
+    describe("host_to_remote_only", function()
+        it("is synced up but not down", function()
+            helpers.write_file(".nvim/rsync.toml", {
+                'remote_path = "' .. helpers.dest .. '/"',
+                'host_to_remote_only = ["src_only/"]',
+            })
+            helpers.mkdir("src_only")
+            helpers.write_file("src_only/file.c", { "local content" })
+
+            vim.cmd.RsyncUp()
+            helpers.wait_sync()
+            helpers.assert_file("src_only/file.c")
+
+            -- a file created on the remote inside the host-only dir must NOT
+            -- be pulled down
+            helpers.write_remote_file("src_only/remote_change.c", { "remote content" })
+            helpers.assert_on_remote_only("src_only/remote_change.c")
+
+            vim.cmd.RsyncDown()
+            helpers.wait_sync()
+
+            helpers.assert_on_remote_only("src_only/remote_change.c")
+        end)
+    end)
+
+    describe("remote_to_host_only", function()
+        it("is synced down but not up", function()
+            helpers.write_file(".nvim/rsync.toml", {
+                'remote_path = "' .. helpers.dest .. '/"',
+                'remote_to_host_only = ["data_only/"]',
+            })
+            -- bootstrap the remote tree with an initial RsyncUp
+            helpers.write_file("seed.txt", { "seed" })
+            vim.cmd.RsyncUp()
+            helpers.wait_sync()
+
+            helpers.mkdir_remote("data_only")
+            helpers.write_remote_file("data_only/result.dat", { "remote produced" })
+            helpers.assert_on_remote_only("data_only/result.dat")
+
+            vim.cmd.RsyncDown()
+            helpers.wait_sync()
+            helpers.assert_file("data_only/result.dat")
+
+            -- a local file created in the remote-only dir must NOT be pushed up
+            helpers.write_file("data_only/local_change.c", { "local content" })
+
+            vim.cmd.RsyncUp()
+            helpers.wait_sync()
+
+            vim.fn.system("! test -f " .. helpers.dest .. "/data_only/local_change.c")
+            assert.equals(0, vim.v.shell_error)
+            -- and the remote-only result file must still be there on remote
+            -- (not deleted by --delete from sync_up)
+            vim.fn.system("test -f " .. helpers.dest .. "/data_only/result.dat")
+            assert.equals(0, vim.v.shell_error)
+        end)
+
+        it("saving inside does not trigger sync_up", function()
+            helpers.write_file(".nvim/rsync.toml", {
+                'remote_path = "' .. helpers.dest .. '/"',
+                'remote_to_host_only = ["data_only/"]',
+            })
+            -- bootstrap remote tree
+            helpers.write_file("seed.txt", { "seed" })
+            vim.cmd.RsyncUp()
+            helpers.wait_sync()
+            assert.equals(require("rsync").status(), "Sync succeeded")
+
+            helpers.mkdir("data_only")
+            helpers.write_file("data_only/note.txt", { "jotted down locally" })
+            vim.cmd.w()
+            -- no sync_up should have been kicked off: status from the
+            -- previous RsyncUp should still read "Sync succeeded" and the
+            -- file must not appear on the remote.
+            assert.equals(require("rsync").status(), "Sync succeeded")
+            vim.fn.system("! test -f " .. helpers.dest .. "/data_only/note.txt")
+            assert.equals(0, vim.v.shell_error)
+        end)
+    end)
 end)
